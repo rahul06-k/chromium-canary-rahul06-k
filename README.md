@@ -1,11 +1,10 @@
 # Chromium Canary Submission — Rahul K (@rahul06-k)
 
 ## 1. Loom Walkthrough Video
-* **Video URL:** [Watch 5-Minute Walkthrough](https://www.loom.com/share/YOUR_LOOM_VIDEO_ID)
-  *(Make sure link sharing is set to "Anyone with the link can view")*
+* **Video URL:** [Watch 5-Minute Walkthrough](https://www.loom.com/share/bb94ed24042d482c97b6ba6729f200c1)
 
 ## 2. Build Info
-* **Chromium Commit ID (`git rev-parse HEAD`):** `c1f5571a6b82b287c5a7d027189148b3253fae42`
+* **Chromium Commit ID (`git rev-parse HEAD`):** `0a35dc167d61d8efa59ac156b65ed5301550623e`
 * **Target Built:** `chrome`
 * **My Laptop OS & RAM:** `Windows 11, 16GB RAM`
 
