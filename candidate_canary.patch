@@ -1,0 +1,95 @@
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 8e493b8..f41a02c 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -103,6 +103,7 @@
+ #include "third_party/blink/public/common/loader/url_loader_throttle.h"
+ #include "third_party/blink/public/common/switches.h"
++#include "base/command_line.h"
+ 
+ namespace {
+ 
++class BrowserCanaryURLLoaderThrottle : public blink::URLLoaderThrottle {
++ public:
++  explicit BrowserCanaryURLLoaderThrottle(std::string id) : id_(std::move(id)) {}
++  void WillStartRequest(network::ResourceRequest* request, bool* defer) override {
++    if (request->url.SchemeIsHTTPOrHTTPS()) {
++      request->headers.SetHeader("X-Candidate-Canary", id_);
++    }
++  }
+ private:
++  std::string id_;
++};
++
+@@ -4820,6 +4833,12 @@ ChromeContentBrowserClient::CreateURLLoaderThrottles(
+   std::vector<std::unique_ptr<blink::URLLoaderThrottle>> result;
+ 
++  const auto* cmd = base::CommandLine::ForCurrentProcess();
++  if (cmd->HasSwitch("inject-candidate-id")) {
++    result.push_back(std::make_unique<BrowserCanaryURLLoaderThrottle>(
++        cmd->GetSwitchValueASCII("inject-candidate-id")));
++  }
++
+   CHECK(browser_context, base::NotFatalUntil::M163);
+diff --git a/chrome/renderer/url_loader_throttle_provider_impl.cc b/chrome/renderer/url_loader_throttle_provider_impl.cc
+index 45b89a1..a2e3150 100644
+--- a/chrome/renderer/url_loader_throttle_provider_impl.cc
++++ b/chrome/renderer/url_loader_throttle_provider_impl.cc
+@@ -35,6 +35,7 @@
+ #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
++#include "third_party/blink/public/common/loader/url_loader_throttle.h"
+ #include "third_party/blink/public/web/modules/credentialmanagement/throttle_helper.h"
+ 
+ namespace {
+ 
++class CanaryURLLoaderThrottle : public blink::URLLoaderThrottle {
++ public:
++  explicit CanaryURLLoaderThrottle(std::string id) : id_(std::move(id)) {}
++  void WillStartRequest(network::ResourceRequest* request, bool* defer) override {
++    if (request->url.SchemeIsHTTPOrHTTPS()) {
++      request->headers.SetHeader("X-Candidate-Canary", id_);
++    }
++  }
+ private:
++  std::string id_;
++};
++
+@@ -140,6 +154,12 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
+   std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
+ 
++  const auto* command_line = base::CommandLine::ForCurrentProcess();
++  if (command_line->HasSwitch("inject-candidate-id")) {
++    throttles.push_back(std::make_unique<CanaryURLLoaderThrottle>(
++        command_line->GetSwitchValueASCII("inject-candidate-id")));
++  }
++
+   // Some throttles have already been added in the browser for frame resources.
+diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
+index c3a912d..b84712e 100644
+--- a/content/browser/renderer_host/render_process_host_impl.cc
++++ b/content/browser/renderer_host/render_process_host_impl.cc
+@@ -3450,6 +3450,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+     static const char* const kSwitchNames[] = {
++        "inject-candidate-id",
+         switches::kDisableInProcessStackTraces,
+         sandbox::policy::switches::kDisableLandlockSandbox,
+diff --git a/third_party/blink/renderer/core/frame/frame_console.cc b/third_party/blink/renderer/core/frame/frame_console.cc
+index 748b9c2..5908f2a 100644
+--- a/third_party/blink/renderer/core/frame/frame_console.cc
++++ b/third_party/blink/renderer/core/frame/frame_console.cc
+@@ -30,6 +30,8 @@
+ #include <memory>
++#include "base/logging.h"
++#include "base/time/time.h"
+ 
+ #include "third_party/blink/public/common/features.h"
+@@ -62,6 +64,11 @@ FrameConsole::FrameConsole(LocalFrame& frame) : frame_(&frame) {}
+ void FrameConsole::AddMessage(ConsoleMessage* console_message,
+                               bool discard_duplicates) {
++  if (console_message &&
++      console_message->GetLevel() == mojom::blink::ConsoleMessageLevel::kWarning &&
++      console_message->Message() == "canary-ping") {
++    LOG(INFO) << "[CANARY_ACK] Verified build for rahul06-k at "
++              << base::TimeTicks::Now();
++  }
+   if (AddMessageToStorage(console_message, discard_duplicates)) {
