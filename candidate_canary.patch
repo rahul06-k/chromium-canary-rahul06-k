@@ -1,14 +1,13 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 8e493b8..f41a02c 100644
+index cb894086d4..392d743a73 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -103,6 +103,7 @@
- #include "third_party/blink/public/common/loader/url_loader_throttle.h"
- #include "third_party/blink/public/common/switches.h"
-+#include "base/command_line.h"
+@@ -6239,6 +6239,22 @@ std::unique_ptr<blink::URLLoaderThrottle> CreateGoogleURLLoaderThrottle(
+       std::move(dynamic_params));
+ }
  
- namespace {
- 
++namespace {
++
 +class BrowserCanaryURLLoaderThrottle : public blink::URLLoaderThrottle {
 + public:
 +  explicit BrowserCanaryURLLoaderThrottle(std::string id) : id_(std::move(id)) {}
@@ -17,11 +16,17 @@ index 8e493b8..f41a02c 100644
 +      request->headers.SetHeader("X-Candidate-Canary", id_);
 +    }
 +  }
- private:
++ private:
 +  std::string id_;
 +};
 +
-@@ -4820,6 +4833,12 @@ ChromeContentBrowserClient::CreateURLLoaderThrottles(
++}  // namespace
++
+ std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
+ ChromeContentBrowserClient::CreateURLLoaderThrottles(
+     const network::ResourceRequest& request,
+@@ -6251,6 +6267,12 @@ ChromeContentBrowserClient::CreateURLLoaderThrottles(
+ 
    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> result;
  
 +  const auto* cmd = base::CommandLine::ForCurrentProcess();
@@ -31,15 +36,18 @@ index 8e493b8..f41a02c 100644
 +  }
 +
    CHECK(browser_context, base::NotFatalUntil::M163);
+   Profile* profile = Profile::FromBrowserContext(browser_context);
+   CHECK(profile, base::NotFatalUntil::M163);
 diff --git a/chrome/renderer/url_loader_throttle_provider_impl.cc b/chrome/renderer/url_loader_throttle_provider_impl.cc
-index 45b89a1..a2e3150 100644
+index 3b9484cb59..0361138c19 100644
 --- a/chrome/renderer/url_loader_throttle_provider_impl.cc
 +++ b/chrome/renderer/url_loader_throttle_provider_impl.cc
-@@ -35,6 +35,7 @@
- #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
-+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
- #include "third_party/blink/public/web/modules/credentialmanagement/throttle_helper.h"
+@@ -56,8 +56,22 @@
+ #include "components/safe_browsing/content/renderer/renderer_url_loader_throttle.h"
+ #endif
  
++#include "third_party/blink/public/common/loader/url_loader_throttle.h"
++
  namespace {
  
 +class CanaryURLLoaderThrottle : public blink::URLLoaderThrottle {
@@ -50,11 +58,15 @@ index 45b89a1..a2e3150 100644
 +      request->headers.SetHeader("X-Candidate-Canary", id_);
 +    }
 +  }
- private:
++ private:
 +  std::string id_;
 +};
 +
-@@ -140,6 +154,12 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+ std::unique_ptr<extensions::ExtensionThrottleManager>
+ CreateExtensionThrottleManager() {
+@@ -179,6 +193,12 @@ URLLoaderThrottleProviderImpl::CreateThrottles(
+ 
    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
  
 +  const auto* command_line = base::CommandLine::ForCurrentProcess();
@@ -64,26 +76,35 @@ index 45b89a1..a2e3150 100644
 +  }
 +
    // Some throttles have already been added in the browser for frame resources.
+   // Don't add them for frame requests.
+   bool is_frame_resource =
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
-index c3a912d..b84712e 100644
+index fa725c5a0a..f87b82d9e8 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc
 +++ b/content/browser/renderer_host/render_process_host_impl.cc
-@@ -3450,6 +3450,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
-     static const char* const kSwitchNames[] = {
-+        "inject-candidate-id",
-         switches::kDisableInProcessStackTraces,
-         sandbox::policy::switches::kDisableLandlockSandbox,
+@@ -3922,6 +3922,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
+   // Propagate the following switches to the renderer command line (along
+   // with any associated values) if present in the browser command line.
+   static const char* const kSwitchNames[] = {
++      "inject-candidate-id",
+       switches::kDisableInProcessStackTraces,
+       sandbox::policy::switches::kDisableLandlockSandbox,
+       sandbox::policy::switches::kDisableSeccompFilterSandbox,
 diff --git a/third_party/blink/renderer/core/frame/frame_console.cc b/third_party/blink/renderer/core/frame/frame_console.cc
-index 748b9c2..5908f2a 100644
+index 11728a3310..ea1a7d653d 100644
 --- a/third_party/blink/renderer/core/frame/frame_console.cc
 +++ b/third_party/blink/renderer/core/frame/frame_console.cc
 @@ -30,6 +30,8 @@
+ 
  #include <memory>
+ 
 +#include "base/logging.h"
 +#include "base/time/time.h"
- 
  #include "third_party/blink/public/common/features.h"
-@@ -62,6 +64,11 @@ FrameConsole::FrameConsole(LocalFrame& frame) : frame_(&frame) {}
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
+@@ -52,6 +54,12 @@ FrameConsole::FrameConsole(LocalFrame& frame) : frame_(&frame) {}
+ 
  void FrameConsole::AddMessage(ConsoleMessage* console_message,
                                bool discard_duplicates) {
 +  if (console_message &&
@@ -93,3 +114,5 @@ index 748b9c2..5908f2a 100644
 +              << base::TimeTicks::Now();
 +  }
    if (AddMessageToStorage(console_message, discard_duplicates)) {
+     ReportMessageToClient(
+         console_message->GetSource(), console_message->GetLevel(),
